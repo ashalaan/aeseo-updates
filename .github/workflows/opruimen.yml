@@ -1,0 +1,31 @@
+# Elk uur: bouwlogs wissen, en de installer verwijderen als die ouder is dan 24 uur.
+# (Zodra AESEO op je laptop is bijgewerkt, wordt hij meestal al eerder handmatig weggehaald.)
+name: Opruimen
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  opruimen:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          R: ${{ github.repository }}
+        run: |
+          # Logs van afgeronde runs (behalve deze) wissen
+          for id in $(gh run list -R "$R" --limit 100 --json databaseId,status --jq '.[] | select(.status=="completed") | .databaseId'); do
+            [ "$id" = "$GITHUB_RUN_ID" ] || gh api -X DELETE "repos/$R/actions/runs/$id" >/dev/null 2>&1 || true
+          done
+          # Installers ouder dan 24 uur weg
+          cutoff=$(date -u -d '24 hours ago' +%s)
+          gh release list -R "$R" --limit 100 --json tagName,publishedAt --jq '.[] | "\(.tagName) \(.publishedAt)"' | while read t at; do
+            [ -n "$at" ] || continue
+            if [ "$(date -u -d "$at" +%s)" -lt "$cutoff" ]; then gh release delete "$t" -R "$R" --yes --cleanup-tag; fi
+          done
